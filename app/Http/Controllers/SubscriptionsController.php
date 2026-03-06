@@ -132,7 +132,7 @@ class SubscriptionsController extends Controller
     // Insert DB
     $sql = new Subscriptions();
     $sql->user_id = auth()->id();
-    $sql->creator_id  = $creator->id;
+    $sql->creator_id = $creator->id;
     $sql->stripe_price = $creator->plan;
     $sql->free = 'yes';
     $sql->save();
@@ -207,49 +207,150 @@ class SubscriptionsController extends Controller
       ]);
     }
 
-    // Insert DB
-    $subscription              = new Subscriptions();
-    $subscription->user_id     = auth()->id();
-    $subscription->creator_id  = $creator->id;
-    $subscription->stripe_price = $plan->name;
-    $subscription->ends_at     = $creator->planInterval($plan->interval);
-    $subscription->rebill_wallet = 'on';
-    $subscription->interval = $plan->interval;
-    $subscription->taxes = auth()->user()->taxesPayable();
-    $subscription->save();
-
-    // Admin and user earnings calculation
-    $earnings = $this->earningsAdminUser($creator->custom_fee, $amount, null, null);
-
-    // Insert Transaction
-    $this->transaction(
-      'subw_' . str_random(25),
+    // Activate Subscription
+    $this->activateSubscription(
       auth()->id(),
-      $subscription->id,
       $creator->id,
+      $plan->name,
+      $plan->interval,
       $amount,
-      $earnings['user'],
-      $earnings['admin'],
       'Wallet',
-      'subscription',
-      $earnings['percentageApplied'],
+      'subw_' . str_random(25),
       auth()->user()->taxesPayable()
     );
 
     // Subtract user funds
     auth()->user()->decrement('wallet', Helper::amountGross($amount));
 
-    // Add Earnings to User
-    $creator->increment('balance', $earnings['user']);
-
-    // Send Email to User and Notification
-    Subscriptions::sendEmailAndNotify(auth()->user()->name, $creator->id);
-
-    $this->sendWelcomeMessageAction($creator, auth()->id());
-
     return response()->json([
       'success' => true,
       'url' => url('buy/subscription/success', $creator->username)
+    ]);
+  }
+
+  /**
+   * Buy subscription via Pix
+   *
+   * @return Response
+   */
+  public function buySubscriptionPix()
+  {
+    // Find the User
+    $user = User::whereVerifiedId('yes')
+      ->whereId($this->request->id)
+      ->where('id', '<>', auth()->id())
+      ->firstOrFail();
+
+    // Check if Plan exists
+    $plan = $user->plans()
+      ->whereInterval($this->request->interval)
+      ->firstOrFail();
+
+    if (!$plan->status) {
+      return response()->json([
+        'success' => false,
+        'errors' => ['error' => __('general.subscription_not_available')],
+      ]);
+    }
+
+    // Check if subscription exists
+    $checkSubscription = auth()->user()->userSubscriptions()
+      ->whereStripePrice($plan->name)
+      ->where('ends_at', '>=', now())
+      ->first();
+
+    if ($checkSubscription) {
+      return response()->json([
+        'success' => false,
+        'errors' => ['error' => __('general.subscription_exists')],
+      ]);
+    }
+
+    //<---- Validation
+    $validator = Validator::make($this->request->all(), [
+      'agree_terms' => 'required',
+    ]);
+
+    if ($validator->fails()) {
+      return response()->json([
+        'success' => false,
+        'errors' => $validator->getMessageBag()->toArray(),
+      ]);
+    }
+
+    $amount = $plan->price;
+    $taxes = auth()->user()->isTaxable()->sum('percentage');
+    $totalTaxes = ($amount * $taxes / 100);
+    $finalAmount = number_format($amount + $totalTaxes, 2, '.', '');
+
+    // Metadata for the deposit
+    $metadata = 'subscription:' . $user->id . ':' . $plan->interval;
+
+    // Create Deposit (Pending)
+    $deposit = $this->deposit(
+      auth()->id(),
+      'pix_' . str_random(25),
+      $amount,
+      'OpenPix',
+      auth()->user()->taxesPayable(),
+      $metadata
+    );
+
+    // Update status to initialized (as per OpenPix integration pattern)
+    $deposit->status = 'initialized';
+    $deposit->save();
+
+    try {
+      $openpix = app(\OpenPix\PhpSdk\Client::class);
+
+      $charge = [
+        'correlationID' => $deposit->txn_id,
+        'value' => (int) ($finalAmount * 100), // In cents
+        'comment' => __('general.subscription') . ' @' . $user->username,
+        'customer' => [
+          'name' => auth()->user()->name,
+          'email' => auth()->user()->email,
+          'taxID' => auth()->user()->ssn ?? '', // Assuming ssn might be tax ID
+        ],
+      ];
+
+      $result = $openpix->charges()->create($charge);
+
+      return response()->json([
+        'success' => true,
+        'pixQrCodeUrl' => $result['charge']['qrCodeImage'],
+        'pixCopyPaste' => $result['charge']['brCode'],
+        'correlationID' => $deposit->txn_id,
+      ]);
+
+    } catch (\Exception $e) {
+      $deposit->delete();
+      return response()->json([
+        'success' => false,
+        'errors' => ['error' => $e->getMessage()],
+      ]);
+    }
+  }
+
+  /**
+   * Check Pix Status
+   *
+   * @return Response
+   */
+  public function checkPixStatus($id)
+  {
+    $deposit = auth()->user()->deposits()->whereTxnId($id)->first();
+
+    if ($deposit && $deposit->status == 'active') {
+      return response()->json([
+        'success' => true,
+        'status' => 'active'
+      ]);
+    }
+
+    return response()->json([
+      'success' => true,
+      'status' => 'pending'
     ]);
   }
 

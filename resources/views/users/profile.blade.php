@@ -1332,6 +1332,96 @@ $('.subsCCBill').on('click', function() {
     		confirmButtonText: "{{ __('users.ok') }}"
     		});
     	 @endif
+
+  // Direct Pix Subscription
+  $(document).on('click', '.subscriptionBtn', function(e) {
+    const paymentGateway = $('input[name=payment_gateway]:checked').val();
+    
+    if (paymentGateway == 'OpenPix') {
+      e.stopImmediatePropagation();
+      e.preventDefault();
+
+      const btn = $(this);
+      const form = $('#formSubscription');
+      
+      btn.attr('disabled', 'disabled');
+      btn.find('i').addClass('spinner-border spinner-border-sm align-middle mr-1');
+
+      $.ajax({
+        type: "POST",
+        url: "{{ route('subscription.pix') }}",
+        data: form.serialize(),
+        success: function(response) {
+          if (response.success) {
+            $('#subscriptionForm').modal('hide');
+            $('#pixQrCode').attr('src', response.pixQrCodeUrl);
+            $('#pixCopyPaste').val(response.pixCopyPaste);
+            $('#modalPix').modal({
+              backdrop: 'static',
+              keyboard: false,
+              show: true
+            });
+
+            // Start Polling
+            startPixPolling(response.correlationID);
+
+          } else {
+            let error = '';
+            for (let key in response.errors) {
+              error += '<li><i class="far fa-times-circle"></i> ' + response.errors[key] + '</li>';
+            }
+            $('#showErrors').html(error);
+            $('#error').fadeIn(500);
+            btn.removeAttr('disabled');
+            btn.find('i').removeClass('spinner-border spinner-border-sm align-middle mr-1');
+          }
+        },
+        error: function() {
+          btn.removeAttr('disabled');
+          btn.find('i').removeClass('spinner-border spinner-border-sm align-middle mr-1');
+        }
+      });
+    }
+  });
+
+  $('#btnCopyPix').on('click', function() {
+    const copyText = document.getElementById("pixCopyPaste");
+    copyText.select();
+    copyText.setSelectionRange(0, 99999);
+    document.execCommand("copy");
+    
+    $(this).html('<i class="feather icon-check"></i>');
+    setTimeout(() => {
+      $(this).html('<i class="feather icon-copy"></i>');
+    }, 2000);
+  });
+
+  let pixPollingInterval;
+  function startPixPolling(correlationID) {
+    if (pixPollingInterval) clearInterval(pixPollingInterval);
+
+    pixPollingInterval = setInterval(() => {
+      $.ajax({
+        type: "GET",
+        url: URL_BASE + "/status/pix/" + correlationID,
+        success: function(response) {
+          if (response.status == 'active') {
+            clearInterval(pixPollingInterval);
+            $('#pixStatusMessage').html('<span class="text-success"><i class="fa fa-check-circle mr-1"></i> {{ __("general.payment_success") }}</span>');
+            
+            setTimeout(() => {
+              window.location.href = "{{ url('buy/subscription/success', $user->username) }}";
+            }, 2000);
+          }
+        }
+      });
+    }, 5000);
+  }
+
+  $('#modalPix').on('hidden.bs.modal', function () {
+    if (pixPollingInterval) clearInterval(pixPollingInterval);
+  });
+
 </script>
 @endsection
 @php session()->forget('subscription_cancel') @endphp

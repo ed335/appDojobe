@@ -83,7 +83,7 @@ trait Functions
 		$payment = PaymentGateways::whereName('CCBill')->firstOrFail();
 
 		if ($creator) {
-			$user  = User::whereVerifiedId('yes')->whereId($creator)->firstOrFail();
+			$user = User::whereVerifiedId('yes')->whereId($creator)->firstOrFail();
 		}
 
 		$currencyCodes = [
@@ -115,18 +115,18 @@ trait Functions
 		// Hash
 		$hash = md5($formPrice . $formInitialPeriod . $currencyCode . $payment->ccbill_salt);
 
-		$input['clientAccnum']  = $payment->ccbill_accnum;
-		$input['clientSubacc']  = $payment->ccbill_subacc;
-		$input['currencyCode']  = $currencyCode;
-		$input['formDigest']    = $hash;
-		$input['initialPrice']  = $formPrice;
+		$input['clientAccnum'] = $payment->ccbill_accnum;
+		$input['clientSubacc'] = $payment->ccbill_subacc;
+		$input['currencyCode'] = $currencyCode;
+		$input['formDigest'] = $hash;
+		$input['initialPrice'] = $formPrice;
 		$input['initialPeriod'] = $formInitialPeriod;
-		$input['type']          = $type;
-		$input['isMessage']     = $isMessage;
-		$input['creator']       = $user->id ?? null;
-		$input['user']          = $userAuth;
-		$input['amountFixed']   = $price;
-		$input['taxes']         = auth()->user()->taxesPayable();
+		$input['type'] = $type;
+		$input['isMessage'] = $isMessage;
+		$input['creator'] = $user->id ?? null;
+		$input['user'] = $userAuth;
+		$input['amountFixed'] = $price;
+		$input['taxes'] = auth()->user()->taxesPayable();
 
 		// Base url
 		$baseURL = 'https://api.ccbill.com/wap-frontflex/flexforms/' . $payment->ccbill_flexid;
@@ -164,7 +164,7 @@ trait Functions
 		}
 
 		if (isset($paymentFee)) {
-			$paymentFees =  $paymentFeeCents == 0.00 ? $paymentFee . '% + ' : $paymentFee . '%' . ' + ' . $paymentFeeCents . ' + ';
+			$paymentFees = $paymentFeeCents == 0.00 ? $paymentFee . '% + ' : $paymentFee . '%' . ' + ' . $paymentFeeCents . ' + ';
 		} else {
 			$paymentFees = null;
 		}
@@ -217,12 +217,12 @@ trait Functions
 
 		// Insert Transaction
 		$txn = new Transactions();
-		$txn->txn_id  = $txnId;
+		$txn->txn_id = $txnId;
 		$txn->user_id = $userId;
 		$txn->subscriptions_id = $subscriptionsId;
 		$txn->subscribed = $subscribed;
-		$txn->amount   = $amount;
-		$txn->earning_net_user  =  $userEarning;
+		$txn->amount = $amount;
+		$txn->earning_net_user = $userEarning;
 		$txn->earning_net_admin = $referred ? $referred['adminEarning'] : $adminEarning;
 		$txn->payment_gateway = $paymentGateway;
 		$txn->type = $type;
@@ -244,6 +244,53 @@ trait Functions
 		Notifications::sendPushNotificationAdmin($txn->user_id);
 
 		return $txn;
+	}
+
+	/**
+	 * Activate Subscription
+	 */
+	public function activateSubscription($userId, $creatorId, $planName, $planInterval, $amount, $paymentGateway, $txnId, $taxes = null)
+	{
+		$creator = User::find($creatorId);
+
+		// Insert DB
+		$subscription = new Subscriptions();
+		$subscription->user_id = $userId;
+		$subscription->creator_id = $creatorId;
+		$subscription->stripe_price = $planName;
+		$subscription->ends_at = $creator->planInterval($planInterval);
+		$subscription->rebill_wallet = $paymentGateway == 'Wallet' ? 'on' : 'off';
+		$subscription->interval = $planInterval;
+		$subscription->taxes = $taxes;
+		$subscription->save();
+
+		// Admin and user earnings calculation
+		$earnings = $this->earningsAdminUser($creator->custom_fee, $amount, null, null);
+
+		// Insert Transaction
+		$this->transaction(
+			$txnId,
+			$userId,
+			$subscription->id,
+			$creatorId,
+			$amount,
+			$earnings['user'],
+			$earnings['admin'],
+			$paymentGateway,
+			'subscription',
+			$earnings['percentageApplied'],
+			$taxes
+		);
+
+		// Add Earnings to User
+		$creator->increment('balance', $earnings['user']);
+
+		// Send Email to User and Notification
+		Subscriptions::sendEmailAndNotify(User::find($userId)->name, $creatorId);
+
+		$this->sendWelcomeMessageAction($creator, $userId);
+
+		return $subscription;
 	}
 	// Insert PayPerViews
 	public function payPerViews($user_id, $updates_id, $messages_id)
@@ -294,7 +341,7 @@ trait Functions
 		$paymentFeeCents = $payment->fee_cents;
 
 		// Percentage applied
-		$percentageApplied =  $paymentFeeCents == 0.00 ?
+		$percentageApplied = $paymentFeeCents == 0.00 ?
 			(($paymentFee != 0.0) ? $paymentFee . '%' : null)
 			: (($paymentFee != 0.0) ? $paymentFee . '% + ' : null) . $paymentFeeCents;
 
@@ -430,14 +477,14 @@ trait Functions
 						$adminEarningFinal = $adminEarning - ($adminEarning * $percentageReferred / 100);
 
 						$earningNetUser = ($adminEarning - $adminEarningFinal);
-						$adminEarning   = ($adminEarning - $earningNetUser);
+						$adminEarning = ($adminEarning - $earningNetUser);
 
 						if (in_array(config('settings.currency_code'), config('currencies.zero-decimal'))) {
 							$earningNetUser = floor($earningNetUser);
-							$adminEarning   = floor($adminEarning);
+							$adminEarning = floor($adminEarning);
 						} else {
 							$earningNetUser = round($earningNetUser, 2, PHP_ROUND_HALF_DOWN);
-							$adminEarning   = round($adminEarning, 2, PHP_ROUND_HALF_DOWN);
+							$adminEarning = round($adminEarning, 2, PHP_ROUND_HALF_DOWN);
 						}
 
 						if ($earningNetUser != 0) {
@@ -615,10 +662,10 @@ trait Functions
 		$agent = new Agent();
 
 		// Device
-		$device  = $agent->device();
+		$device = $agent->device();
 
 		// Device type
-		$deviceType  = $agent->isPhone() ? 'phone' : 'desktop';
+		$deviceType = $agent->isPhone() ? 'phone' : 'desktop';
 
 		// Browser
 		$browser = $agent->browser();
@@ -745,7 +792,7 @@ trait Functions
 			'token' => $this->mediaToken(),
 			'status' => 'active',
 			'created_at' => now()
-		  ]);
+		]);
 	}
 
 	public function uploadMediaFile($request, $postId, $type = 'file')

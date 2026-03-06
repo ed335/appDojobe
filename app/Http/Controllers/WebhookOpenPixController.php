@@ -6,6 +6,9 @@ use App\Models\User;
 use App\Models\Deposits;
 use OpenPix\PhpSdk\Client;
 use Illuminate\Http\Request;
+use App\Models\Subscriptions;
+use App\Models\Plans;
+use App\Notifications\SendTwoFactorCode;
 
 class WebhookOpenPixController extends Controller
 {
@@ -22,14 +25,17 @@ class WebhookOpenPixController extends Controller
     /**
      * Create a new `WebhookController` instance.
      */
-    public function __construct(protected Client $openpix) {}
+    public function __construct(protected Client $openpix)
+    {
+    }
 
     /**
      * Main endpoint to receive webhooks.
      */
     public function receive(Request $request)
     {
-        if ($response = $this->allowRequestOnlyFromOpenPix($request)) return $response;
+        if ($response = $this->allowRequestOnlyFromOpenPix($request))
+            return $response;
 
         return $this->handleWebhook($request);
     }
@@ -42,11 +48,12 @@ class WebhookOpenPixController extends Controller
         $rawPayload = $request->getContent();
         $signature = $request->header(self::SIGNATURE_HEADER);
 
-        $isWebhookValid = ! empty($rawPayload)
-            && ! empty($signature)
+        $isWebhookValid = !empty($rawPayload)
+            && !empty($signature)
             && $this->openpix->webhooks()->isWebhookValid($rawPayload, $signature);
 
-        if ($isWebhookValid) return null;
+        if ($isWebhookValid)
+            return null;
 
         return response()->json([
             "errors" => [
@@ -78,12 +85,35 @@ class WebhookOpenPixController extends Controller
                 ],
             ], 404);
         }
-        
+
         $deposit->txn_id = $transactionID ?? $deposit->txn_id;
         $deposit->status = 'active';
         $deposit->save();
 
-        User::find($deposit->user_id)->increment('wallet', $deposit->amount);
+        // Check if it's a direct subscription
+        if (strpos($deposit->screenshot_transfer, 'subscription:') === 0) {
+            $parts = explode(':', $deposit->screenshot_transfer);
+            $creatorId = $parts[1];
+            $planInterval = $parts[2];
+
+            $creator = User::find($creatorId);
+            $plan = $creator->plans()->whereInterval($planInterval)->first();
+
+            if ($plan) {
+                $this->activateSubscription(
+                    $deposit->user_id,
+                    $creator->id,
+                    $plan->name,
+                    $plan->interval,
+                    $deposit->amount,
+                    'OpenPix',
+                    $deposit->txn_id,
+                    $deposit->taxes
+                );
+            }
+        } else {
+            User::find($deposit->user_id)->increment('wallet', $deposit->amount);
+        }
 
         return response()->json(["message" => "Success."]);
     }
@@ -108,10 +138,10 @@ class WebhookOpenPixController extends Controller
             self::OPENPIX_TRANSACTION_RECEIVED_EVENT,
         ];
 
-        $isChargePaidEvent = ! empty($event) && in_array($event, $allowedEvents);
+        $isChargePaidEvent = !empty($event) && in_array($event, $allowedEvents);
 
         return $isChargePaidEvent
-            && ! empty($request->input("charge.correlationID"));
+            && !empty($request->input("charge.correlationID"));
     }
 
     /**
@@ -123,7 +153,7 @@ class WebhookOpenPixController extends Controller
     {
         $event = $request->input("evento");
 
-        return ! empty($event) && $event === self::TEST_WEBHOOK_EVENT;
+        return !empty($event) && $event === self::TEST_WEBHOOK_EVENT;
     }
 
     /**
