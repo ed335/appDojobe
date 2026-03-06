@@ -218,6 +218,7 @@ Route::group(['middleware' => 'auth'], function () {
 	Route::get('status/pix/{id}', [SubscriptionsController::class, 'checkPixStatus'])->name('status.pix');
 	Route::post('buy/subscription', [SubscriptionsController::class, 'buy']);
 	Route::post('buy/subscription/pix', [SubscriptionsController::class, 'buySubscriptionPix'])->name('subscription.pix');
+	Route::get('test/pix/simulate/{txn_id}', [SubscriptionsController::class, 'simulatePixPayment']);
 
 	// Free Subscription
 	Route::post('subscription/free', [SubscriptionsController::class, 'subscriptionFree']);

@@ -7,6 +7,7 @@ use App\Models\User;
 use App\Models\Plans;
 use Illuminate\Http\Request;
 use App\Models\Notifications;
+use App\Models\Deposits;
 use App\Models\Subscriptions;
 use App\Models\PaymentGateways;
 use App\Models\SubscriptionDeleted;
@@ -15,6 +16,8 @@ use Illuminate\Support\Facades\Validator;
 class SubscriptionsController extends Controller
 {
   use Traits\Functions;
+
+  protected $request;
 
   public function __construct(Request $request)
   {
@@ -352,6 +355,36 @@ class SubscriptionsController extends Controller
       'success' => true,
       'status' => 'pending'
     ]);
+  }
+
+  /**
+   * Simulate Pix Payment (LOCAL TESTING ONLY)
+   */
+  public function simulatePixPayment($id)
+  {
+    if (config('app.env') != 'local') {
+      abort(404);
+    }
+
+    $deposit = Deposits::whereTxnId($id)->firstOrFail();
+
+    if ($deposit->status == 'pending' && str_contains($deposit->screenshot_transfer, 'subscription:')) {
+
+      $data = explode(':', $deposit->screenshot_transfer);
+      $creatorId = $data[1];
+      $interval = $data[2];
+
+      // Activate Subscription
+      $this->activateSubscription($deposit->user_id, $creatorId, 'Sub-Pix-' . $id, $interval, $deposit->amount, 'OpenPix', $id);
+
+      // Update Deposit
+      $deposit->status = 'active';
+      $deposit->save();
+
+      return "Payment simulated successfully for TXN: " . $id;
+    }
+
+    return "Deposit already active or not a direct subscription pix payment.";
   }
 
   protected function subscriptionDeleted($creatorId, $userId)

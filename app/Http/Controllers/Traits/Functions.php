@@ -100,7 +100,7 @@ trait Functions
 			$taxes = config('settings.tax_on_wallet') ? ($this->request->amount * auth()->user()->isTaxable()->sum('percentage') / 100) : 0;
 
 			if (in_array(config('settings.currency_code'), config('currencies.zero-decimal'))) {
-				$formPrice = round($price + ($price * $payment->fee / 100) + $payment->fee_cents + $taxes, 2, '.', '');
+				$formPrice = number_format($price + ($price * $payment->fee / 100) + $payment->fee_cents + $taxes, 2, '.', '');
 			} else {
 				$formPrice = number_format($price + ($price * $payment->fee / 100) + $payment->fee_cents + $taxes, 2, '.', '');
 			}
@@ -383,7 +383,7 @@ trait Functions
 			$data = ['code' => $code];
 
 			$user->notify(new SendTwoFactorCode($data));
-		} catch (Exception $e) {
+		} catch (\Exception $e) {
 			\Log::info("Error Two Factor Code: " . $e->getMessage());
 		}
 	} // End method
@@ -647,12 +647,12 @@ trait Functions
 		});
 
 		$sql->when((int) request('min_age') >= 18, function ($q) {
-			$minAge = Carbon::now()->subYear(request('min_age'));
+			$minAge = Carbon::now()->subYears(request('min_age'));
 			$q->where(DB::raw('STR_TO_DATE(birthdate, "%m/%d/%Y")'), '<', Carbon::parse($minAge->format('m/d/Y')));
 		});
 
 		$sql->when((int) request('max_age'), function ($q) {
-			$maxAge = Carbon::now()->subYear(request('max_age'));
+			$maxAge = Carbon::now()->subYears(request('max_age'));
 			$q->where(DB::raw('STR_TO_DATE(birthdate, "%m/%d/%Y")'), '>=', Carbon::parse($maxAge->format('m/d/Y')));
 		});
 	}

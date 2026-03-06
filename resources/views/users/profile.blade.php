@@ -1186,6 +1186,49 @@
         </div>
       </div>
     </div><!-- End Modal Subscription Free -->
+
+    <!-- Modal Pix -->
+    <div class="modal fade" id="modalPix" tabindex="-1" role="dialog" aria-labelledby="modal-form" aria-hidden="true">
+      <div class="modal-dialog modal- modal-dialog-centered modal-sm" role="document">
+        <div class="modal-content">
+          <div class="modal-body p-0">
+            <div class="card bg-white shadow border-0">
+              <div class="card-header pb-2 border-0 position-relative" style="height: 100px; background: {{$settings->color_default}} @if ($user->cover != '')  url('{{Helper::getFile(config('path.cover').$user->cover)}}') no-repeat center center @endif; background-size: cover;">
+              </div>
+              <div class="card-body px-lg-5 py-lg-5 position-relative text-center">
+                <div class="mb-3">
+                  <img src="{{Helper::getFile(config('path.avatar').$user->avatar)}}" width="100" alt="" class="avatar-modal rounded-circle mb-1">
+                </div>
+                
+                <h6 class="mb-3">{{ __('general.subscription') }} - Pix</h6>
+                
+                <div id="pixQrCodeContainer" class="mb-3">
+                  <img id="pixQrCode" src="" class="img-fluid border rounded p-2" alt="QR Code Pix">
+                </div>
+
+                <div class="form-group mb-3">
+                  <label class="small font-weight-bold">Pix Copia e Cola</label>
+                  <div class="input-group">
+                    <input type="text" class="form-control form-control-sm" id="pixCopyPaste" readonly>
+                    <div class="input-group-append">
+                      <button class="btn btn-outline-primary btn-sm" type="button" id="btnCopyPix">
+                        <i class="feather icon-copy"></i>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <div id="pixStatusMessage" class="text-muted small mb-3">
+                  <i class="fas fa-spinner fa-spin mr-1"></i> {{ __('general.waiting_payment') }}
+                </div>
+
+                <button type="button" class="btn btn-secondary btn-sm w-100" data-dismiss="modal">{{ __('admin.cancel') }}</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div><!-- End Modal Pix -->
   @endif
 @endsection
 
