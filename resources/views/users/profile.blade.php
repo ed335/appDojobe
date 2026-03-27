@@ -1025,12 +1025,13 @@
                       </label>
                     </div>
 
-                    @if ($payment->name == 'Stripe' && ! auth()->user()->pm_type != '')
+                    @if ($payment->name == 'Stripe')
                       <div id="stripeContainer" class="@if ($allPayment->count() == 1 && $payment->name == 'Stripe')d-block @else display-none @endif">
-                      <a href="{{ url('settings/payments/card') }}" class="btn btn-secondary btn-sm mb-3 w-100">
-                        <i class="far fa-credit-card mr-2"></i>
-                        {{ __('general.add_payment_card') }}
-                      </a>
+                        <div id="card-element" class="margin-bottom-10">
+                          <!-- A Stripe Element will be inserted here. -->
+                        </div>
+                        <!-- Used to display form errors. -->
+                        <div id="card-errors" class="alert alert-danger display-none" role="alert"></div>
                       </div>
                     @endif
 
@@ -1376,17 +1377,50 @@ $('.subsCCBill').on('click', function() {
     		});
     	 @endif
 
-  // Direct Pix Subscription
+  // Stripe Elements for Subscription
+  var stripe = Stripe(stripeKey);
+  var elements = stripe.elements();
+  var cardElement = elements.create('card', {
+    style: {
+      base: {
+        color: colorStripe,
+        fontFamily: '"Helvetica Neue", Helvetica, sans-serif',
+        fontSmoothing: 'antialiased',
+        fontSize: '16px',
+        '::placeholder': {
+          color: '#aab7c4'
+        }
+      },
+      invalid: {
+        color: '#fa755a',
+        iconColor: '#fa755a'
+      }
+    },
+    hidePostalCode: true
+  });
+
+  $('#subscriptionForm').on('shown.bs.modal', function() {
+    cardElement.mount('#card-element');
+  });
+
+  $(document).on('click', 'input[name=payment_gateway]', function() {
+    if($(this).val() == 'Stripe') {
+      $('#stripeContainer').slideDown();
+    } else {
+      $('#stripeContainer').slideUp();
+    }
+  });
+
+  // Direct Pix/Stripe Subscription
   $(document).on('click', '.subscriptionBtn', function(e) {
     const paymentGateway = $('input[name=payment_gateway]:checked').val();
+    const btn = $(this);
+    const form = $('#formSubscription');
     
     if (paymentGateway == 'OpenPix') {
       e.stopImmediatePropagation();
       e.preventDefault();
 
-      const btn = $(this);
-      const form = $('#formSubscription');
-      
       btn.attr('disabled', 'disabled');
       btn.find('i').addClass('spinner-border spinner-border-sm align-middle mr-1');
 
@@ -1422,6 +1456,69 @@ $('.subsCCBill').on('click', function() {
         error: function() {
           btn.removeAttr('disabled');
           btn.find('i').removeClass('spinner-border spinner-border-sm align-middle mr-1');
+        }
+      });
+    } else if (paymentGateway == 'Stripe') {
+      e.stopImmediatePropagation();
+      e.preventDefault();
+
+      btn.attr('disabled', 'disabled');
+      btn.find('i').addClass('spinner-border spinner-border-sm align-middle mr-1');
+
+      stripe.createPaymentMethod('card', cardElement).then(function(result) {
+        if (result.error) {
+          $('#card-errors').html(result.error.message).fadeIn();
+          btn.removeAttr('disabled');
+          btn.find('i').removeClass('spinner-border spinner-border-sm align-middle mr-1');
+        } else {
+          const formData = form.serializeArray();
+          formData.push({name: 'payment_method_id', value: result.paymentMethod.id});
+
+          $.ajax({
+            type: "POST",
+            url: "{{ route('subscription.stripe') }}",
+            data: $.param(formData),
+            success: function(response) {
+              if (response.success) {
+                if (response.requires_action) {
+                  stripe.handleCardAction(response.payment_intent_client_secret).then(function(result) {
+                    if (result.error) {
+                      $('#card-errors').html(error_payment_stripe_3d).fadeIn();
+                      btn.removeAttr('disabled');
+                      btn.find('i').removeClass('spinner-border spinner-border-sm align-middle mr-1');
+                    } else {
+                      // Confirm again on server
+                      $.ajax({
+                        type: "POST",
+                        url: "{{ route('subscription.stripe') }}",
+                        data: $.param(formData),
+                        success: function(res) {
+                          if (res.success) {
+                            window.location.href = res.url;
+                          }
+                        }
+                      });
+                    }
+                  });
+                } else {
+                  window.location.href = response.url;
+                }
+              } else {
+                let error = '';
+                for (let key in response.errors) {
+                  error += '<li><i class="far fa-times-circle"></i> ' + response.errors[key] + '</li>';
+                }
+                $('#showErrors').html(error);
+                $('#error').fadeIn(500);
+                btn.removeAttr('disabled');
+                btn.find('i').removeClass('spinner-border spinner-border-sm align-middle mr-1');
+              }
+            },
+            error: function() {
+              btn.removeAttr('disabled');
+              btn.find('i').removeClass('spinner-border spinner-border-sm align-middle mr-1');
+            }
+          });
         }
       });
     }

@@ -18,6 +18,82 @@ class StripeController extends Controller
   }
 
   /**
+   * Buy direct subscription (AJAX)
+   *
+   * @return response
+   */
+  public function buySubscription()
+  {
+    if (!$this->request->expectsJson()) {
+      abort(404);
+    }
+
+    // Find the user to subscribe
+    $user = User::whereVerifiedId('yes')
+      ->whereId($this->request->id)
+      ->where('id', '<>', auth()->id())
+      ->firstOrFail();
+
+    // Check if Plan exists
+    $plan = $user->plans()
+      ->whereInterval($this->request->interval)
+      ->latest()
+      ->firstOrFail();
+
+    // Check if subscription exists
+    $checkSubscription = auth()->user()->userSubscriptions()
+      ->whereStripePrice($plan->name)
+      ->where('ends_at', '>=', now())
+      ->first();
+
+    if ($checkSubscription) {
+      return response()->json([
+        'success' => false,
+        'errors' => ['error' => __('general.subscription_exists')],
+      ]);
+    }
+
+    $paymentGateway = PaymentGateways::whereName('Stripe')->whereEnabled(1)->firstOrFail();
+
+    try {
+      $userPlan = $this->createPlan($paymentGateway->key_secret, $plan, $user);
+
+      // Create New subscription
+      $metadata = [
+        'interval' => $plan->interval,
+        'creator_id' => $user->id,
+        'taxes' => auth()->user()->taxesPayable()
+      ];
+
+      auth()->user()->newSubscription('main', $userPlan)
+        ->withMetadata($metadata)
+        ->create($this->request->payment_method_id);
+
+      // Send Email to User and Notification
+      Subscriptions::sendEmailAndNotify(auth()->user()->name, $user->id);
+
+      $this->sendWelcomeMessageAction($user, auth()->id());
+
+      return response()->json([
+        'success' => true,
+        'url' => url('buy/subscription/success', $user->username)
+      ]);
+
+    } catch (IncompletePayment $exception) {
+      return response()->json([
+        'success' => true,
+        'requires_action' => true,
+        'payment_intent_client_secret' => $exception->payment->client_secret,
+      ]);
+    } catch (\Exception $exception) {
+      return response()->json([
+        'success' => false,
+        'errors' => ['error' => $exception->getMessage()]
+      ]);
+    }
+  }
+
+  /**
    * Show/Send data Stripe
    *
    * @return response
